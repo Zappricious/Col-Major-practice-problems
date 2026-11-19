@@ -1,0 +1,6 @@
+{
+  "name": "CodeBench — COL1000 Python Judge",
+  "description": "Real-time Python 3 coding platform with integrated editor, instant sample and hidden test case evaluation, live performance leaderboard, and step-by-step solutions for all 22 COL1000 IIT Delhi practice problems.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
