@@ -1,6 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { onAuthStateChanged, type User as FirebaseUser } from 'firebase/auth';
 import { PROBLEMS, getProblemById } from './data/problems.ts';
-import type { JudgeResponse, LeaderboardEntry } from './types.ts';
+import type { LeaderboardEntry } from './types.ts';
+import {
+  auth,
+  ensureUserDocuments,
+  signInWithGoogle,
+  signOutUser,
+  subscribeLeaderboard,
+  updateLeaderboardProfile
+} from './firebase.ts';
 import { TopNav, type ActiveRoute } from './components/TopNav.tsx';
 import { ProblemsView } from './components/ProblemsView.tsx';
 import { WorkspaceView } from './components/WorkspaceView.tsx';
@@ -9,37 +18,7 @@ import { LeaderboardView } from './components/LeaderboardView.tsx';
 import { ProfileModal } from './components/ProfileModal.tsx';
 
 const STORAGE_THEME = 'codebench_theme_v1';
-const STORAGE_PROFILE = 'codebench_profile_v1';
 const STORAGE_CODE_PREFIX = 'codebench_code_v1_';
-
-interface UserProfile {
-  handle: string;
-  displayName: string;
-  department: string;
-}
-
-function loadInitialProfile(): UserProfile {
-  try {
-    const raw = localStorage.getItem(STORAGE_PROFILE);
-    if (raw) {
-      const parsed = JSON.parse(raw) as Partial<UserProfile>;
-      if (parsed.handle) {
-        return {
-          handle: parsed.handle,
-          displayName: parsed.displayName || parsed.handle,
-          department: parsed.department || 'COL1000 · IIT Delhi'
-        };
-      }
-    }
-  } catch {
-    // Ignore storage errors
-  }
-  return {
-    handle: 'iitd_coder',
-    displayName: 'You',
-    department: 'COL1000 · IIT Delhi'
-  };
-}
 
 function loadInitialTheme(): 'dark' | 'light' {
   try {
@@ -67,8 +46,12 @@ export default function App() {
   const [selectedProblemId, setSelectedProblemId] = useState<number>(1);
   const [solutionProblemId, setSolutionProblemId] = useState<number>(1);
   const [theme, setTheme] = useState<'dark' | 'light'>(loadInitialTheme);
-  const [profile, setProfile] = useState<UserProfile>(loadInitialProfile);
   const [showProfileModal, setShowProfileModal] = useState(false);
+
+  const [authUser, setAuthUser] = useState<FirebaseUser | null>(null);
+  const [authReady, setAuthReady] = useState(false);
+  const [authActionBusy, setAuthActionBusy] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
 
   const [codeMap, setCodeMap] = useState<Record<number, string>>(() => ({
     1: loadSavedCode(1)
@@ -92,29 +75,48 @@ export default function App() {
     }
   }, [theme]);
 
-  const fetchLeaderboard = useCallback(async (handle: string) => {
-    setLoadingLeaderboard(true);
-    try {
-      const res = await fetch(`/api/leaderboard?handle=${encodeURIComponent(handle)}`);
-      if (res.ok) {
-        const data = (await res.json()) as { entries: LeaderboardEntry[] };
-        setLeaderboard(data.entries);
+  // Listen to Firebase Auth state
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setAuthUser(user);
+      setAuthReady(true);
+      if (user) {
+        ensureUserDocuments(user).catch((err) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          setAuthError(`Profile setup could not complete: ${msg}`);
+        });
       }
-    } catch {
-      // Ignore network hiccup
-    } finally {
-      setLoadingLeaderboard(false);
-    }
+    });
+    return () => unsubscribe();
   }, []);
 
+  // Subscribe to real-time shared Firestore leaderboard ONLY when authenticated
   useEffect(() => {
-    void fetchLeaderboard(profile.handle);
-  }, [profile.handle, fetchLeaderboard]);
+    if (!authReady || !authUser) {
+      setLeaderboard([]);
+      setLoadingLeaderboard(false);
+      return;
+    }
+
+    setLoadingLeaderboard(true);
+    const unsubscribe = subscribeLeaderboard(authUser.uid, (entries) => {
+      setLeaderboard(entries);
+      setLoadingLeaderboard(false);
+    });
+    return () => unsubscribe();
+  }, [authReady, authUser]);
 
   const currentUserEntry = useMemo(
     () => leaderboard.find((e) => e.isCurrentUser) || null,
     [leaderboard]
   );
+
+  const currentHandle =
+    currentUserEntry?.handle ||
+    (authUser?.email ? authUser.email.split('@')[0].toLowerCase().replace(/[^a-z0-9_-]/g, '_') : 'guest');
+  const currentDisplayName =
+    currentUserEntry?.displayName || authUser?.displayName || currentHandle;
+  const currentDepartment = currentUserEntry?.department || 'COL1000 · IIT Delhi';
 
   const solvedIds = useMemo(
     () => new Set<number>(currentUserEntry?.solvedIds ?? []),
@@ -164,43 +166,82 @@ export default function App() {
     setActiveRoute('solutions');
   }, []);
 
-  const handleSaveProfile = async (next: UserProfile) => {
-    setProfile(next);
+  const handleSignIn = useCallback(async () => {
+    if (authActionBusy) return;
+    setAuthActionBusy(true);
+    setAuthError(null);
     try {
-      localStorage.setItem(STORAGE_PROFILE, JSON.stringify(next));
-    } catch {
-      // Ignore
-    }
-    try {
-      const res = await fetch('/api/profile', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(next)
-      });
-      if (res.ok) {
-        const data = (await res.json()) as { entries: LeaderboardEntry[] };
-        setLeaderboard(data.entries);
-      }
-    } catch {
-      // Ignore
-    }
-  };
+      await signInWithGoogle();
+    } catch (err: unknown) {
+      const code =
+        typeof err === 'object' && err !== null && 'code' in err
+          ? String((err as { code?: string }).code)
+          : '';
+      const msg = err instanceof Error ? err.message : String(err);
 
-  const handleSubmissionComplete = useCallback(
-    (_res: JudgeResponse) => {
-      void fetchLeaderboard(profile.handle);
-    },
-    [fetchLeaderboard, profile.handle]
-  );
+      if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+        // User intentionally dismissed the popup
+      } else if (code === 'auth/popup-blocked') {
+        setAuthError(
+          'Your browser blocked the Google sign-in popup inside the preview frame. Allow popups for this site or open the app directly in a new tab.'
+        );
+      } else if (code === 'auth/unauthorized-domain') {
+        setAuthError(
+          `Domain "${window.location.hostname}" is not yet authorized in Firebase Auth. Add it under Firebase Console -> Authentication -> Settings -> Authorized domains.`
+        );
+      } else {
+        setAuthError(`Google sign-in failed (${code || 'unknown'}): ${msg}`);
+      }
+    } finally {
+      setAuthActionBusy(false);
+    }
+  }, [authActionBusy]);
+
+  const handleSignOut = useCallback(async () => {
+    await signOutUser();
+  }, []);
+
+  const handleSaveProfile = async (next: {
+    handle: string;
+    displayName: string;
+    department: string;
+  }) => {
+    if (!authUser) return;
+    await updateLeaderboardProfile(authUser.uid, next);
+  };
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-[#0B0E14] text-slate-900 dark:text-slate-100">
       <TopNav
         activeRoute={activeRoute}
         onNavigate={setActiveRoute}
-        userHandle={profile.handle}
+        isSignedIn={Boolean(authUser)}
+        authLoading={!authReady || authActionBusy}
+        userHandle={currentHandle}
+        onSignIn={() => void handleSignIn()}
         onOpenProfileModal={() => setShowProfileModal(true)}
       />
+
+      {authError && (
+        <div className="bg-rose-50 dark:bg-rose-950/50 border-b border-rose-200 dark:border-rose-500/30 px-4 py-2.5 text-xs text-rose-700 dark:text-rose-300 flex flex-wrap items-center justify-center gap-3">
+          <span>{authError}</span>
+          <a
+            href={window.location.href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-semibold underline text-rose-900 dark:text-rose-100 whitespace-nowrap"
+          >
+            Open in New Tab
+          </a>
+          <button
+            type="button"
+            onClick={() => setAuthError(null)}
+            className="text-rose-600 dark:text-rose-400 hover:underline cursor-pointer"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       {activeRoute === 'problems' && (
         <ProblemsView
@@ -225,9 +266,10 @@ export default function App() {
           solvedIds={solvedIds}
           theme={theme}
           onToggleTheme={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
-          userHandle={profile.handle}
-          userDisplayName={profile.displayName}
-          onSubmissionComplete={handleSubmissionComplete}
+          authUser={authUser}
+          userHandle={currentHandle}
+          userDisplayName={currentDisplayName}
+          onSignIn={() => void handleSignIn()}
         />
       )}
 
@@ -244,19 +286,22 @@ export default function App() {
         <LeaderboardView
           entries={leaderboard}
           loading={loadingLeaderboard}
+          isSignedIn={Boolean(authUser)}
           totalProblems={PROBLEMS.length}
-          onRefresh={() => void fetchLeaderboard(profile.handle)}
+          onSignIn={() => void handleSignIn()}
           onOpenProfileModal={() => setShowProfileModal(true)}
           onStartSolving={() => setActiveRoute('problems')}
         />
       )}
 
-      {showProfileModal && (
+      {showProfileModal && authUser && (
         <ProfileModal
-          handle={profile.handle}
-          displayName={profile.displayName}
-          department={profile.department}
+          email={authUser.email}
+          handle={currentHandle}
+          displayName={currentDisplayName}
+          department={currentDepartment}
           onSave={handleSaveProfile}
+          onSignOut={handleSignOut}
           onClose={() => setShowProfileModal(false)}
         />
       )}

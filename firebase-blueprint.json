@@ -1,0 +1,203 @@
+{
+  "entities": {
+    "UserPrivateProfile": {
+      "title": "UserPrivateProfile",
+      "description": "Private user account record isolating PII such as email from public leaderboard data.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Firebase Auth UID of the user."
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "maxLength": 254,
+          "description": "Verified email address visible strictly to the owner."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the account record was created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the account record was last updated."
+        }
+      },
+      "required": ["uid", "email", "createdAt", "updatedAt"]
+    },
+    "LeaderboardProfile": {
+      "title": "LeaderboardProfile",
+      "description": "Public competitive standing on the shared COL1000 leaderboard (contains zero PII).",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Owner Firebase Auth UID matching the document ID."
+        },
+        "handle": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 24,
+          "pattern": "^[a-z0-9_\\-]+$",
+          "description": "Public coder handle displayed on the leaderboard."
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32,
+          "description": "Public display name on the leaderboard."
+        },
+        "department": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32,
+          "description": "Department or batch label."
+        },
+        "isPublic": {
+          "type": "boolean",
+          "description": "Explicit opt-in flag for public leaderboard queries (must be true)."
+        },
+        "solvedIds": {
+          "type": "array",
+          "description": "Bounded array (max 22) of solved COL1000 problem IDs (1..22)."
+        },
+        "solvedCount": {
+          "type": "integer",
+          "description": "Exact length of solvedIds (0..22)."
+        },
+        "totalSubmissions": {
+          "type": "integer",
+          "description": "Total number of judged submissions (0..10000)."
+        },
+        "acceptedSubmissions": {
+          "type": "integer",
+          "description": "Total number of Accepted submissions (0..totalSubmissions)."
+        },
+        "totalAcceptedRuntimeMs": {
+          "type": "integer",
+          "description": "Cumulative runtime in ms across accepted submissions."
+        },
+        "score": {
+          "type": "integer",
+          "description": "Total competitive score (0..10000)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Immutable server creation timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of latest activity."
+        }
+      },
+      "required": [
+        "uid",
+        "handle",
+        "displayName",
+        "department",
+        "isPublic",
+        "solvedIds",
+        "solvedCount",
+        "totalSubmissions",
+        "acceptedSubmissions",
+        "totalAcceptedRuntimeMs",
+        "score",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "Submission": {
+      "title": "Submission",
+      "description": "Immutable record of a judged Python 3 submission owned by a user.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Owner Firebase Auth UID."
+        },
+        "problemId": {
+          "type": "integer",
+          "description": "COL1000 problem number (1..22)."
+        },
+        "problemTitle": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "description": "Title of the problem."
+        },
+        "verdict": {
+          "type": "string",
+          "enum": ["Accepted", "Wrong Answer", "Runtime Error", "Time Limit Exceeded"],
+          "description": "Final judge verdict."
+        },
+        "passedCount": {
+          "type": "integer",
+          "description": "Number of test cases passed."
+        },
+        "totalCount": {
+          "type": "integer",
+          "description": "Total number of test cases evaluated."
+        },
+        "runtimeMs": {
+          "type": "integer",
+          "description": "Average execution runtime in milliseconds."
+        },
+        "pointsAwarded": {
+          "type": "integer",
+          "description": "Points awarded on first solve (0..375)."
+        },
+        "code": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64000,
+          "description": "Submitted Python 3 source code."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Immutable server timestamp of submission."
+        }
+      },
+      "required": [
+        "uid",
+        "problemId",
+        "problemTitle",
+        "verdict",
+        "passedCount",
+        "totalCount",
+        "runtimeMs",
+        "pointsAwarded",
+        "code",
+        "createdAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserPrivateProfile" },
+      "description": "Owner-only private user account document isolating PII (email)."
+    },
+    "/users/{userId}/submissions/{submissionId}": {
+      "schema": { "$ref": "#/entities/Submission" },
+      "description": "Owner-only immutable submission history gated by the parent user document."
+    },
+    "/leaderboard/{userId}": {
+      "schema": { "$ref": "#/entities/LeaderboardProfile" },
+      "description": "Public non-PII competitive leaderboard standings synced in real time across friends."
+    }
+  }
+}

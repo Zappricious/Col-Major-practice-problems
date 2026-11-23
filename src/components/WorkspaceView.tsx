@@ -19,6 +19,11 @@ import {
   Terminal,
   XCircle
 } from 'lucide-react';
+import type { User as FirebaseUser } from 'firebase/auth';
+import {
+  recordVerifiedSubmission,
+  subscribeProblemSubmissions
+} from '../firebase.ts';
 import type {
   Difficulty,
   JudgeResponse,
@@ -38,9 +43,10 @@ interface WorkspaceViewProps {
   solvedIds: Set<number>;
   theme: 'dark' | 'light';
   onToggleTheme: () => void;
+  authUser: FirebaseUser | null;
   userHandle: string;
   userDisplayName: string;
-  onSubmissionComplete: (res: JudgeResponse) => void;
+  onSignIn: () => void;
 }
 
 type LeftTab = 'description' | 'solution' | 'submissions';
@@ -93,9 +99,10 @@ export function WorkspaceView({
   solvedIds,
   theme,
   onToggleTheme,
+  authUser,
   userHandle,
   userDisplayName,
-  onSubmissionComplete
+  onSignIn
 }: WorkspaceViewProps) {
   const [leftTab, setLeftTab] = useState<LeftTab>('description');
   const [consoleTab, setConsoleTab] = useState<ConsoleTab>('cases');
@@ -129,28 +136,19 @@ export function WorkspaceView({
     setCustomInput(problem.samples[0]?.input ?? '');
   }, [problem.id]);
 
-  const fetchSubmissions = useCallback(async () => {
-    setLoadingSubs(true);
-    try {
-      const res = await fetch(
-        `/api/submissions?handle=${encodeURIComponent(userHandle)}&problemId=${problem.id}`
-      );
-      if (res.ok) {
-        const data = (await res.json()) as { submissions: SubmissionRecord[] };
-        setSubmissions(data.submissions);
-      }
-    } catch {
-      // Ignore network hiccup
-    } finally {
-      setLoadingSubs(false);
-    }
-  }, [userHandle, problem.id]);
-
   useEffect(() => {
-    if (leftTab === 'submissions') {
-      void fetchSubmissions();
+    if (!authUser) {
+      setSubmissions([]);
+      setLoadingSubs(false);
+      return;
     }
-  }, [leftTab, fetchSubmissions]);
+    setLoadingSubs(true);
+    const unsubscribe = subscribeProblemSubmissions(authUser.uid, problem.id, (records) => {
+      setSubmissions(records);
+      setLoadingSubs(false);
+    });
+    return () => unsubscribe();
+  }, [authUser, problem.id]);
 
   const executeCode = useCallback(
     async (mode: 'run' | 'submit' | 'custom') => {
@@ -182,16 +180,30 @@ export function WorkspaceView({
         if (mode === 'custom') {
           setCustomResult(data.customOutput ?? null);
           setConsoleTab('custom');
-        } else {
-          setJudgeResult(data);
+        } else if (mode === 'submit' && authUser) {
+          const synced = await recordVerifiedSubmission(authUser, problem, data, code);
+          setJudgeResult({
+            ...data,
+            pointsAwarded: synced.pointsAwarded,
+            firstSolve: synced.firstSolve
+          });
           setConsoleTab('results');
-          if (mode === 'submit') {
-            onSubmissionComplete(data);
-            void fetchSubmissions();
-          }
+        } else {
+          setJudgeResult({
+            ...data,
+            pointsAwarded: 0,
+            firstSolve: false
+          });
+          setConsoleTab('results');
         }
-      } catch {
-        setApiError('Unable to reach the Python execution server. Please try again.');
+      } catch (err) {
+        if (err instanceof Error && err.message.includes('"operationType"')) {
+          setApiError(
+            'Could not save submission to the shared leaderboard. Please sign out and sign in again with your verified Google account.'
+          );
+        } else {
+          setApiError('Unable to reach the Python execution server. Please try again.');
+        }
       } finally {
         setIsRunning(false);
         setRunningMode(null);
@@ -199,13 +211,12 @@ export function WorkspaceView({
     },
     [
       isRunning,
-      problem.id,
+      problem,
       code,
       customInput,
       userHandle,
       userDisplayName,
-      onSubmissionComplete,
-      fetchSubmissions
+      authUser
     ]
   );
 
@@ -680,7 +691,23 @@ export function WorkspaceView({
                   </span>
                 </div>
 
-                {loadingSubs ? (
+                {!authUser ? (
+                  <div className="py-10 text-center border border-dashed border-slate-200 dark:border-[#232C3D] rounded-lg px-4 space-y-3">
+                    <p className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                      Sign in with Google to save submission history
+                    </p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      Your code attempts, verdicts, and scores sync across devices on the shared leaderboard.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={onSignIn}
+                      className="px-4 py-2 text-xs font-semibold text-slate-950 bg-amber-400 hover:bg-amber-300 rounded-md transition-colors cursor-pointer"
+                    >
+                      Sign in with Google
+                    </button>
+                  </div>
+                ) : loadingSubs ? (
                   <div className="py-10 flex items-center justify-center gap-2 text-xs text-slate-500 dark:text-slate-400">
                     <Loader2 className="w-4 h-4 animate-spin" />
                     <span>Loading submission history...</span>
@@ -948,8 +975,17 @@ export function WorkspaceView({
 
                             {judgeResult.firstSolve && judgeResult.pointsAwarded > 0 && (
                               <div className="font-mono text-xs font-semibold text-amber-700 dark:text-amber-300 tabular-nums">
-                                +{judgeResult.pointsAwarded} pts added to Leaderboard
+                                +{judgeResult.pointsAwarded} pts synced to Live Leaderboard
                               </div>
+                            )}
+                            {judgeResult.mode === 'submit' && !authUser && (
+                              <button
+                                type="button"
+                                onClick={onSignIn}
+                                className="text-xs font-semibold text-amber-700 dark:text-amber-300 hover:underline cursor-pointer"
+                              >
+                                Sign in with Google to save score to Leaderboard
+                              </button>
                             )}
                           </div>
                         );

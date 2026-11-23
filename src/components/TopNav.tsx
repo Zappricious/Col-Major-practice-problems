@@ -1,11 +1,14 @@
-import { User } from 'lucide-react';
+import { LogIn, User } from 'lucide-react';
 
 export type ActiveRoute = 'problems' | 'workspace' | 'solutions' | 'leaderboard';
 
 interface TopNavProps {
   activeRoute: ActiveRoute;
   onNavigate: (route: ActiveRoute) => void;
+  isSignedIn: boolean;
+  authLoading: boolean;
   userHandle: string;
+  onSignIn: () => void;
   onOpenProfileModal: () => void;
 }
 
@@ -19,7 +22,10 @@ const NAV_ITEMS: { id: ActiveRoute; label: string }[] = [
 export function TopNav({
   activeRoute,
   onNavigate,
+  isSignedIn,
+  authLoading,
   userHandle,
+  onSignIn,
   onOpenProfileModal
 }: TopNavProps) {
   return (
@@ -58,15 +64,27 @@ export function TopNav({
           })}
         </nav>
 
-        {/* Zone 3: 1 primary action (Profile / Handle) */}
-        <button
-          type="button"
-          onClick={onOpenProfileModal}
-          className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-medium text-slate-900 dark:text-slate-100 bg-slate-100 dark:bg-[#192130] hover:bg-slate-200 dark:hover:bg-[#222C40] border border-slate-200 dark:border-[#2A3548] rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
-        >
-          <User className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
-          <span className="font-mono max-w-[120px] truncate">{userHandle}</span>
-        </button>
+        {/* Zone 3: 1 primary action (Sign in or Profile Handle) */}
+        {isSignedIn ? (
+          <button
+            type="button"
+            onClick={onOpenProfileModal}
+            className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-medium text-slate-900 dark:text-slate-100 bg-slate-100 dark:bg-[#192130] hover:bg-slate-200 dark:hover:bg-[#222C40] border border-slate-200 dark:border-[#2A3548] rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
+          >
+            <User className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+            <span className="font-mono max-w-[120px] truncate">{userHandle}</span>
+          </button>
+        ) : (
+          <button
+            type="button"
+            disabled={authLoading}
+            onClick={onSignIn}
+            className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-slate-950 bg-amber-400 hover:bg-amber-300 rounded-md transition-colors whitespace-nowrap shrink-0 disabled:opacity-60 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
+          >
+            <LogIn className="w-3.5 h-3.5" />
+            <span>Sign in</span>
+          </button>
+        )}
       </div>
     </header>
   );

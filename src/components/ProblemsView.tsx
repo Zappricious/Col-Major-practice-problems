@@ -8,10 +8,10 @@ import {
   Lock,
   Moon,
   Search,
-  Sun,
-  X
+  Sun
 } from 'lucide-react';
 import type { Difficulty, Problem, Topic } from '../types.ts';
+import { PdfViewerModal } from './PdfViewerModal.tsx';
 
 interface ProblemsViewProps {
   problems: Problem[];
@@ -392,40 +392,13 @@ export function ProblemsView({
         </div>
       </div>
 
-      {/* Original PDF Reference Modal */}
+      {/* Original PDF Reference Modal (Canvas-rendered via pdfjs-dist for full iframe compatibility) */}
       {showPdfModal && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/75 p-4 sm:p-6"
-          role="dialog"
-          aria-modal="true"
-          aria-label="COL1000 Practice Problems PDF"
-        >
-          <div className="w-full max-w-5xl h-[85vh] bg-white dark:bg-[#111620] border border-slate-200 dark:border-[#232B3A] rounded-lg flex flex-col overflow-hidden">
-            <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-200 dark:border-[#232B3A]">
-              <div>
-                <h2 className="font-display text-sm font-semibold text-slate-900 dark:text-slate-100">
-                  COL1000 Practice Problems v2 (IIT Delhi)
-                </h2>
-                <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Original course problem booklet · All 22 problems are interactive in CodeBench
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowPdfModal(false)}
-                className="p-2 text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white rounded-md cursor-pointer"
-                aria-label="Close PDF viewer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            <iframe
-              src="/assets/aistudio/COL1000_Practice_Problems_Major_0c3a6186.pdf"
-              title="COL1000 Practice Problems PDF"
-              className="flex-1 w-full bg-slate-100 dark:bg-slate-900"
-            />
-          </div>
-        </div>
+        <PdfViewerModal
+          url="/assets/aistudio/COL1000_Practice_Problems_Major_0c3a6186.pdf"
+          title="COL1000 Practice Problems v2 (IIT Delhi)"
+          onClose={() => setShowPdfModal(false)}
+        />
       )}
     </main>
   );
